@@ -1,0 +1,1 @@
+This repository is the official PyTorch implementation of the paper Optical–SAR Fusion for Cloud Removal via Cross-Modal Mutual Knowledge Distillation, which focuses on cloud and cloud shadow removal in optical remote sensing images by fusing complementary information from SAR (Synthetic Aperture Radar) images through cross-modal mutual knowledge distillation.
