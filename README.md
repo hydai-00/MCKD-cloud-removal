@@ -59,6 +59,10 @@ CUDA_VISIBLE_DEVICES=0 python train.py \
 One invocation runs both stages: stage 1 trains the teacher, stage 2 distils the student.
 About 37 h on one 4090.
 
+Training reads the **train** and **validation** splits only. The checkpoint reported in the
+paper is the one with the lowest validation loss, and the test split is not touched while
+training — it is scored once, after training, by `test.py` (section 5).
+
 To run stage 2 alone against the released teacher, add
 
 ```bash

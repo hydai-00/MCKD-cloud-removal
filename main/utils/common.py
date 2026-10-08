@@ -63,8 +63,8 @@ def initialize_logger(file_dir):
     return logger
 
 
-def record_loss(loss_csv, epoch, epoch_time, lr, train_loss, test_loss):
+def record_loss(loss_csv, epoch, epoch_time, lr, train_loss, val_loss):
     """ Record many results."""
-    loss_csv.write('{},{},{},{},{}\n'.format(epoch, epoch_time, lr, train_loss, test_loss))
+    loss_csv.write('{},{},{},{},{}\n'.format(epoch, epoch_time, lr, train_loss, val_loss))
     loss_csv.flush()
     loss_csv.close

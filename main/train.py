@@ -57,7 +57,6 @@ def arg_parse():
     parser.add_argument('--data_list_filepath', type=str, default='../splits/splits.csv')
     parser.add_argument('--student_only', type=bool, default=False)
     parser.add_argument('--t_copy', type=bool, default=True)
-    parser.add_argument('--test_pre', type=bool, default=True)
     parser.add_argument('--copy_begin', type=bool, default=True)
     parser.add_argument('--lr_decay', type=bool, default=True)
     parser.add_argument('--teacher_path', type=str,
@@ -257,16 +256,12 @@ if __name__ == '__main__':
     if args.dataset_name == 'Sen12':
         from dataloader import *
 
-        train_filelist, val_filelist, test_filelist = get_train_val_test_filelists(args.data_list_filepath)
+        train_filelist, val_filelist, _ = get_train_val_test_filelists(args.data_list_filepath)
         train_data = AlignedDataset(args, train_filelist)
         train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True,
                                   num_workers=args.num_workers, pin_memory=True, drop_last=True)
         val_data = AlignedDataset(args, val_filelist, False)
         val_loader = DataLoader(dataset=val_data, batch_size=1, shuffle=False,
-                                num_workers=args.num_workers, pin_memory=True, drop_last=True)
-        if args.test_pre:
-            test_data = AlignedDataset(args, test_filelist, False)
-            test_loader = DataLoader(dataset=test_data, batch_size=1, shuffle=False,
                                 num_workers=args.num_workers, pin_memory=True, drop_last=True)
 
     if not args.student_only:
@@ -287,10 +282,10 @@ if __name__ == '__main__':
 
             lr = optimizer.param_groups[0]['lr']
             print(f"Epoch [{epoch_idx}], Time:{epoch_time:.4f}, lr:{lr:.6f}, "
-                  f"Train Loss:{train_loss:.6f}, Test Loss:{val_loss:.6f}, PSNR:{psnr:.4f}, SSIM:{ssim:.4f}, MAE:{mae:.4f}, SAM:{sam:.4f}")
+                  f"Train Loss:{train_loss:.6f}, Val Loss:{val_loss:.6f}, PSNR:{psnr:.4f}, SSIM:{ssim:.4f}, MAE:{mae:.4f}, SAM:{sam:.4f}")
             record_loss(loss_csv, epoch_idx, epoch_time, lr, train_loss, val_loss)
             logger.info(f"Epoch [{epoch_idx}], Time:{epoch_time:.4f}, lr:{lr:.6f}, "
-                        f"Train Loss:{train_loss:.6f}, Test Loss:{val_loss:.6f}, PSNR:{psnr:.4f}, SSIM:{ssim:.4f}, MAE:{mae:.4f}, SAM:{sam:.4f}")
+                        f"Train Loss:{train_loss:.6f}, Val Loss:{val_loss:.6f}, PSNR:{psnr:.4f}, SSIM:{ssim:.4f}, MAE:{mae:.4f}, SAM:{sam:.4f}")
             save_checkpoint(model_path, epoch_idx, network, optimizer, name='last')
             logger.info(f"save epoch{epoch_idx} to last.pkl")
     print('---------------------------start_train_student_model---------------------------')
@@ -339,24 +334,18 @@ if __name__ == '__main__':
     if args.dataset_name == 'Sen12':
         from dataloader import *
 
-        train_filelist, val_filelist, test_filelist = get_train_val_test_filelists(args.data_list_filepath)
+        train_filelist, val_filelist, _ = get_train_val_test_filelists(args.data_list_filepath)
         train_data = AlignedDataset(args, train_filelist)
         train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True,
                                   num_workers=args.num_workers, pin_memory=True, drop_last=True)
         val_data = AlignedDataset(args, val_filelist, False)
         val_loader = DataLoader(dataset=val_data, batch_size=1, shuffle=False,
                                 num_workers=args.num_workers, pin_memory=True, drop_last=True)
-        if args.test_pre:
-            test_data = AlignedDataset(args, test_filelist, False)
-            test_loader = DataLoader(dataset=test_data, batch_size=1, shuffle=False,
-                                num_workers=args.num_workers, pin_memory=True, drop_last=True)
 
     for epoch_idx in range(args.star_epoch, args.star_epoch + args.total_epoch):
         start_time = time.time()
         train_loss = train(train_loader, network_s, criterion, optimizer, network,optimizer_t,epoch_idx)
         val_loss, sam, psnr, ssim, mae = validate(val_loader, network_s, criterion_test, epoch_idx, result_path)
-        if args.test_pre and epoch_idx >= 8:
-            test_loss, test_sam, test_psnr, test_ssim, test_mae = validate(test_loader, network_s, criterion_test, epoch_idx, result_path)
         if val_loss < best_loss:
             save_checkpoint(model_path, epoch_idx, network_s, optimizer, name='best')
             logger.info(f"save epoch{epoch_idx} to best.pkl")
@@ -366,16 +355,10 @@ if __name__ == '__main__':
         epoch_time = time.time() - start_time
 
         lr = optimizer.param_groups[0]['lr']
-        if args.test_pre and epoch_idx >= 8:
-            print(f"Epoch [{epoch_idx}], Time:{epoch_time:.4f}, lr:{lr:.6f}, "
-                  f"Train Loss:{train_loss:.6f}, Val Loss:{val_loss:.6f}, PSNR:{psnr:.4f}, SSIM:{ssim:.4f}, MAE:{mae:.4f}, SAM:{sam:.4f}, Test Loss:{test_loss:.6f}, PSNR:{test_psnr:.4f}, SSIM:{test_ssim:.4f}, MAE:{test_mae:.4f}, SAM:{test_sam:.4f}")
-            logger.info(f"Epoch [{epoch_idx}], Time:{epoch_time:.4f}, lr:{lr:.6f}, "
-                  f"Train Loss:{train_loss:.6f}, Val Loss:{val_loss:.6f}, PSNR:{psnr:.4f}, SSIM:{ssim:.4f}, MAE:{mae:.4f}, SAM:{sam:.4f}, Test Loss:{test_loss:.6f}, PSNR:{test_psnr:.4f}, SSIM:{test_ssim:.4f}, MAE:{test_mae:.4f}, SAM:{test_sam:.4f}")
-        else:
-            print(f"Epoch [{epoch_idx}], Time:{epoch_time:.4f}, lr:{lr:.6f}, "
-                  f"Train Loss:{train_loss:.6f}, Test Loss:{val_loss:.6f}, PSNR:{psnr:.4f}, SSIM:{ssim:.4f}, MAE:{mae:.4f}, SAM:{sam:.4f}")
-            logger.info(f"Epoch [{epoch_idx}], Time:{epoch_time:.4f}, lr:{lr:.6f}, "
-                  f"Train Loss:{train_loss:.6f}, Test Loss:{val_loss:.6f}, PSNR:{psnr:.4f}, SSIM:{ssim:.4f}, MAE:{mae:.4f}, SAM:{sam:.4f}")       
+        print(f"Epoch [{epoch_idx}], Time:{epoch_time:.4f}, lr:{lr:.6f}, "
+              f"Train Loss:{train_loss:.6f}, Val Loss:{val_loss:.6f}, PSNR:{psnr:.4f}, SSIM:{ssim:.4f}, MAE:{mae:.4f}, SAM:{sam:.4f}")
+        logger.info(f"Epoch [{epoch_idx}], Time:{epoch_time:.4f}, lr:{lr:.6f}, "
+                    f"Train Loss:{train_loss:.6f}, Val Loss:{val_loss:.6f}, PSNR:{psnr:.4f}, SSIM:{ssim:.4f}, MAE:{mae:.4f}, SAM:{sam:.4f}")
         record_loss(loss_csv, epoch_idx, epoch_time, lr, train_loss, val_loss)
         if args.lr_decay:
             scheduler.step()
