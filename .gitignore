@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# run outputs
+main/result/
+main/backup/
+main/metric.txt
+main/testvis/
+experiments/
+*.log
+
+# data and weights are distributed separately.
+# checkpoints/*.pkl are published as GitHub release assets rather than committed,
+# so they stay ignored here; see checkpoints/README.md for the escape hatch.
+SEN12MS_dataset/
+checkpoints/*.pkl
+*.pkl
+*.pth
+*.ckpt

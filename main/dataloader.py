@@ -1,11 +1,27 @@
 import os
+
+
 import numpy as np
+
+
 import rasterio
+
+
 import csv
+
+
 import torch
+
+
 from torch.utils.data import Dataset
+
+
 from utils.feature_detectors import get_cloud_mask, get_cloud_cloudshadow_mask
+
+
 import random
+
+
 import cv2
 
 
@@ -29,21 +45,6 @@ def add_speckle_2(img, L=8):
     noisy_gray = gray * noise
     noisy_gray = np.clip(noisy_gray, 0, 1)
     return noisy_gray,gray
-
-
-def add_speckle_noise(img, L=8):
-    img = np.transpose(img, (1, 2, 0))
-
-    gray = cv2.cvtColor(img.astype(np.float32), cv2.COLOR_RGB2GRAY)
-    
-    noise = np.random.gamma(shape=L, scale=1.0/L, size=gray.shape).astype(np.float32)
-    
-    noisy_gray = noise
-    
-    noisy_gray = np.clip(noisy_gray, 0, 1)
-    
-    return noisy_gray, gray
-    
 
 
 class AlignedDataset(Dataset):
@@ -71,7 +72,7 @@ class AlignedDataset(Dataset):
         self.KD = self.opts.KD
         self.random_sim = self.opts.random_sim
         self.L = 2
-   
+
     def set_L(self,L):
         self.L=L
 
@@ -127,14 +128,10 @@ class AlignedDataset(Dataset):
             sim_data = np.ndarray(s1_data.shape)
             gray = np.ndarray(s1_data.shape)
             if not self.random_sim:
-                #L = random.randint(2,10)
                 sim_data[0, :, :],gray[0, :, :] = add_speckle_2(rgb,self.L)
                 sim_data[1, :, :],gray[1, :, :] = add_speckle_2(rgb,self.L)
-                #sim_data = gray
-                
-                #sim_data[0, :, :],gray[0, :, :] = add_speckle_noise(rgb,self.L)
-                #sim_data[1, :, :],gray[1, :, :] = add_speckle_noise(rgb,self.L)
-            
+
+                #sim_data,gray = add_speckle_3(rgb)
             else:
                 n = random.choice([0, 1])
                 sim_data = s1_data.copy()
@@ -243,4 +240,3 @@ def get_train_val_test_filelists(listpath):
     csv_file.close()
 
     return train_filelist, val_filelist, test_filelist
-

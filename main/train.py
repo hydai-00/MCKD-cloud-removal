@@ -2,12 +2,10 @@ import os
 import argparse
 import torch
 import torch.nn as nn
-from utils.check_point_rw import save_checkpoint
+from utils.checkpoint import save_checkpoint
 from torch.utils.data import DataLoader
-from model.hpn import hpn_cr
 from loss import *
-# from dataloader import *
-from dataloader_KD import *
+from dataloader import *
 import numpy as np
 from utils.common import AverageMeter, initialize_logger, record_loss
 from torch.utils.tensorboard import SummaryWriter
@@ -19,31 +17,23 @@ import time
 import cv2
 import random
 
-from model.My_end import Net
+from model.mckd import Net
 
 
 
 torch.manual_seed(100)
 
-global net_mode
-
 global KD_step
-net_mode = -1
 KD_step = 0
-dataset_mode = 0
 
 def arg_parse():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_type', type=str, default='My',
-                        choices=['DSen2_CR', 'CAC', 'USSDRN', 'HPN', 'My', 'USSRN', 'Align_cr', "GLF_CR", "HSSP",
-                                 "E_My"],
+    parser.add_argument('--model_type', type=str, default='My', choices=['My'],
                         help='Select the model to train')
     parser.add_argument('--model_path', type=str, default=None,
                         help='Model save path (if not set, will be set automatically based on model_type)')
-    parser.add_argument('--is_cropland', type=bool, default=False,
-                        help='Use cropland dataset only')
-    parser.add_argument('--add_message', default='My_end', type=str, help='messege on name')
-    # parser.add_argument('--add_message', default=None, type=str, help='messege on name')
+    parser.add_argument('--add_message', default='My_end_KD_teacher', type=str,
+                        help='suffix for the run name under result/')
     parser.add_argument('--num_workers', default=6, type=int, help='number of workers')
     parser.add_argument('--lr', default=0.0001, type=float, help='experimnt setting')
     parser.add_argument('--optimizer', default='adamw', type=str, help='GPUs used for training')
@@ -52,45 +42,40 @@ def arg_parse():
     parser.add_argument('--star_epoch', default=0, type=int, help='')
     parser.add_argument('--total_epoch', default=15, type=int, help='')
     parser.add_argument('--checkpoint_interval', default=1, type=int, help='')
-    parser.add_argument('--weight_path', default=None, type=str, help='./backup/weight_10.pth')
-    parser.add_argument('--cuda_num', default='0', type=str, help='')
+    parser.add_argument('--weight_path', default=None, type=str,
+                        help='optional stage-2 warm start')
+    parser.add_argument('--cuda_num', default='0', type=str,
+                        help='GPU index written to CUDA_VISIBLE_DEVICES')
 
     parser.add_argument('--KD', type=bool, default=True)
     parser.add_argument('--random_sim', type=bool, default=False)
     parser.add_argument('--load_size', type=int, default=256)
     parser.add_argument('--data_augmentation', type=bool, default=True)
-    parser.add_argument('--dataset_name', type=str, default='Smile', choices=['Sen12', 'Smile'])
+    parser.add_argument('--dataset_name', type=str, default='Sen12', choices=['Sen12'],
+                        help='this release implements the SEN12MS-CR path only')
     parser.add_argument('--input_data_folder', type=str, default='../SEN12MS_dataset')
-    #parser.add_argument('--input_data_folder', type=str, default='../smile_cr')
-    parser.add_argument('--data_list_filepath', type=str, default='../csv_script/splits.csv')
+    parser.add_argument('--data_list_filepath', type=str, default='../splits/splits.csv')
     parser.add_argument('--student_only', type=bool, default=False)
     parser.add_argument('--t_copy', type=bool, default=True)
     parser.add_argument('--test_pre', type=bool, default=True)
     parser.add_argument('--copy_begin', type=bool, default=True)
     parser.add_argument('--lr_decay', type=bool, default=True)
-    parser.add_argument('--teacher_path', type=str, default="./result/all_My_My_end_Sen12_KD_teacher/last.pkl")
-    #parser.add_argument('--teacher_path', type=str, default="./result/all_My_My_end_Smile_KD_teacher/last.pkl")
+    parser.add_argument('--teacher_path', type=str,
+                        default='./result/all_My_My_end_KD_teacher/last.pkl',
+                        help='stage-1 checkpoint read when --student_only is set')
     parser.add_argument('--is_test', type=bool, default=False)
- 
+    parser.add_argument('--seed', default=None, type=int,
+                        help='if set, seeds random/numpy/torch after model construction;'
+                             ' default None keeps the historical behaviour')
+
     args = parser.parse_args()
 
     if args.model_path is None:
-        if args.is_cropland:
-            args.model_path = os.path.join('/', f'cropland_{args.model_type}')
-            args.data_list_filepath = '../csv_script/splits.csv'
-            args.total_epoch = 50
-        else:
-            args.model_path = os.path.join('/', f'all_{args.model_type}')
-            args.data_list_filepath = '../csv_script/splits_ori.csv'
-            args.total_epoch = 15
-        if not args.add_message is None:
+        args.model_path = os.path.join('/', f'all_{args.model_type}')
+        args.data_list_filepath = '../splits/splits.csv'
+        args.total_epoch = 15
+        if args.add_message is not None:
             args.model_path = args.model_path + "_" + args.add_message
-    if args.dataset_name != 'Sen12':
-        args.model_path = args.model_path + "_" + args.dataset_name
-        global dataset_mode
-        dataset_mode = 1
-        args.total_epoch = 50
-        args.input_data_folder = '../smile_cr'
     if args.load_size != 256:
         args.model_path = args.model_path + "_" + str(args.load_size)
     if args.KD:
@@ -105,9 +90,6 @@ def train(train_loader, network, criterion, optimizer, network_t=None,optimizer_
     losses = AverageMeter()
     torch.cuda.empty_cache()
     network.train()
-    
-    #if KD_step != 0:
-        #train_loader.dataset.set_L(4+epoch_idx)
 
     idx_iter = 0
     pbar = tqdm(train_loader, disable=True)
@@ -116,9 +98,9 @@ def train(train_loader, network, criterion, optimizer, network_t=None,optimizer_
         sim_img = batch['sim_data'].cuda()
         s1_img = batch['s1_data'].cuda()
         target_img = batch['target'].cuda()
-        
+
         a = random.randint(0,1)
-        
+
         if KD_step == 0:
             output = network(torch.concat([cloudy_img, sim_img], dim=1))
         else:
@@ -131,23 +113,23 @@ def train(train_loader, network, criterion, optimizer, network_t=None,optimizer_
 
                 m2.weight.data.copy_(m1.weight.data)
                 m2.bias.data.copy_(m1.bias.data)
-                
+
                 for m1, m2 in zip(network.module.encoder_list_rgb, network_t.module.encoder_list_rgb):
                     m2.load_state_dict(m1.state_dict())
-            
+
                 for m1, m2 in zip(network.module.processor_list_edge, network_t.module.processor_list_edge):
                     m2.Down_rgb.load_state_dict(m1.Down_rgb.state_dict())
 
                 for p in network_t.module.RGB_pre.parameters():
                     p.requires_grad = False
-            
+
                 for p in network_t.module.encoder_list_rgb.parameters():
                     p.requires_grad = False
-                
+
                 for m in network_t.module.processor_list_edge:
                     for p in m.Down_rgb.parameters():
                         p.requires_grad = False
-                    
+
             output_t = network_t(torch.concat([cloudy_img, sim_img], dim=1))
 
             pred_KD = network.module.KD_label
@@ -193,7 +175,7 @@ def validate(eval_loader, network, criterion, epoch, result_path):
     losses = AverageMeter()
     epoch_path = os.path.join(result_path, str(epoch))
     os.makedirs(epoch_path, exist_ok=True)
-    
+
     pbar = tqdm(eval_loader, desc='Evaluating', unit="batch",disable=True)
 
     for i, batch in enumerate(pbar):
@@ -229,13 +211,10 @@ def validate(eval_loader, network, criterion, epoch, result_path):
 
 
 def save_image(t, i, target, path):
+    """Write one preview tile: bands 4/3/2 of the SEN12MS-CR stack, as 8-bit BGR."""
     t = t[0]
-    if dataset_mode == 0:
-        t = t[[3, 2, 1], ...] 
-        t = torch.clamp(t * 5, 0, 1) * 255.0
-    elif dataset_mode == 1:
-        t = t[[2, 1, 0], ...] 
-        t = torch.clamp(t * 3, 0, 1) * 255.0
+    t = t[[3, 2, 1], ...]          # (3, H, W), false colour
+    t = torch.clamp(t * 5, 0, 1) * 255.0
     t = t.detach().cpu().numpy().astype(np.uint8)
     image = np.transpose(t, (1, 2, 0))
     bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
@@ -248,16 +227,19 @@ if __name__ == '__main__':
     os.environ['CUDA_VISIBLE_DEVICES'] = args.cuda_num
 
 
-    if args.dataset_name == 'Sen12':
-        network = Net(13, 2)
-        criterion = sl1_ssim_sam_loss().cuda()
-    elif args.dataset_name == 'Smile':
-        network = Net(6, 2)
-        criterion = sl1_ssim_sam_loss(6).cuda()
+    network = Net(13, 2)
+    criterion = sl1_ssim_sam_loss().cuda()
 
-    #if args.weight_path is not None:
-        #network.load_state_dict(torch.load(args.weight_path), strict=True)
     network = nn.DataParallel(network).cuda()
+
+    # Applied here: after the model exists, so both arms draw the same random
+    # initialisation, and before any DataLoader is built, so both arms shuffle alike.
+    # The module-level manual_seed(100) alone does not cover random/numpy.
+    if getattr(args, 'seed', None) is not None:
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        torch.cuda.manual_seed_all(args.seed)
 
     if not args.student_only:
         model_path = './result/' + args.model_path
@@ -273,7 +255,7 @@ if __name__ == '__main__':
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.8)
 
     if args.dataset_name == 'Sen12':
-        from dataloader_KD import *
+        from dataloader import *
 
         train_filelist, val_filelist, test_filelist = get_train_val_test_filelists(args.data_list_filepath)
         train_data = AlignedDataset(args, train_filelist)
@@ -287,17 +269,6 @@ if __name__ == '__main__':
             test_loader = DataLoader(dataset=test_data, batch_size=1, shuffle=False,
                                 num_workers=args.num_workers, pin_memory=True, drop_last=True)
 
-    elif args.dataset_name == 'Smile':
-        from dataloader_smile_KD import *
-
-        train_data = AlignedDataset(args, 'train')
-        train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True,
-                                  num_workers=args.num_workers, pin_memory=True, drop_last=True)
-        val_data = AlignedDataset(args, 'val')
-        val_loader = DataLoader(dataset=val_data, batch_size=1, shuffle=False,
-                                num_workers=args.num_workers, pin_memory=True, drop_last=True)
-
-    #args.total_epoch = 5
     if not args.student_only:
         best_loss = float('inf')
 
@@ -323,46 +294,34 @@ if __name__ == '__main__':
             save_checkpoint(model_path, epoch_idx, network, optimizer, name='last')
             logger.info(f"save epoch{epoch_idx} to last.pkl")
     print('---------------------------start_train_student_model---------------------------')
-    
-    if args.dataset_name == 'Sen12':
-        network = Net(13, 2,ist=True)
-    elif args.dataset_name == 'Smile':
-        network = Net(6, 2,ist=True)
+
+    network = Net(13, 2, ist=True)
     network = nn.DataParallel(network).cuda()
     if args.student_only:
         teacher_path = args.teacher_path
     else:
         teacher_path = os.path.join('./result/' + args.model_path, 'last.pkl')
-        #teacher_path = os.path.join('./result/' + args.model_path, 'best.pkl')
     if args.t_copy:
-        #weight = torch.load(teacher_path, weights_only=True)["state_dict"]
         weight = torch.load(teacher_path)["state_dict"]
         network.load_state_dict(weight,strict=False)
         print("Load weight from " + teacher_path)
 
-    #for param in network.parameters():
-        #param.requires_grad = False
-
     args.model_path = args.model_path[:-7] + 'student'
 
     KD_step = 1
-    if args.dataset_name == 'Sen12':
-        network_s = Net(13, 2,iss=True)
-        criterion =  KD_loss_nl2_select_sarea(13)
-    elif args.dataset_name == 'Smile':
-        network_s = Net(6, 2,iss=True)
-        criterion = KD_loss_nl2_select_sarea(6)
-            
+    network_s = Net(13, 2, iss=True)
+    criterion = KD_loss_nl2_select_sarea(13)
+
     network_s = nn.DataParallel(network_s).cuda()
     if args.copy_begin:
         network_s.load_state_dict(weight,strict=False)
         print("Load student weight from " + teacher_path)
-    
+
     if args.weight_path is not None:
         weight = torch.load(args.weight_path, weights_only=True)["state_dict"]
         network_s.load_state_dict(weight)
         print("Load student weight from " + args.weight_path)
-    
+
     model_path = './result/' + args.model_path
     result_path = os.path.join(model_path, 'vis')
     os.makedirs(model_path, exist_ok=True)
@@ -375,11 +334,10 @@ if __name__ == '__main__':
     optimizer_t = torch.optim.AdamW(network.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=15, gamma=0.8)
     best_loss = float('inf')
-    
+
     args.batch_size = 12
-    #args.total_epoch = 10
     if args.dataset_name == 'Sen12':
-        from dataloader_KD import *
+        from dataloader import *
 
         train_filelist, val_filelist, test_filelist = get_train_val_test_filelists(args.data_list_filepath)
         train_data = AlignedDataset(args, train_filelist)
@@ -393,33 +351,19 @@ if __name__ == '__main__':
             test_loader = DataLoader(dataset=test_data, batch_size=1, shuffle=False,
                                 num_workers=args.num_workers, pin_memory=True, drop_last=True)
 
-    elif args.dataset_name == 'Smile':
-        from dataloader_smile_KD import *
-
-        train_data = AlignedDataset(args, 'train')
-        train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True,
-                                  num_workers=args.num_workers, pin_memory=True, drop_last=True)
-        val_data = AlignedDataset(args, 'val', False)
-        val_loader = DataLoader(dataset=val_data, batch_size=1, shuffle=False,
-                                num_workers=args.num_workers, pin_memory=True, drop_last=True)
-        
-        if args.test_pre:
-            test_data = AlignedDataset(args, 'test', False)
-            test_loader = DataLoader(dataset=test_data, batch_size=1, shuffle=False,
-                                num_workers=args.num_workers, pin_memory=True, drop_last=True)
-
     for epoch_idx in range(args.star_epoch, args.star_epoch + args.total_epoch):
         start_time = time.time()
         train_loss = train(train_loader, network_s, criterion, optimizer, network,optimizer_t,epoch_idx)
         val_loss, sam, psnr, ssim, mae = validate(val_loader, network_s, criterion_test, epoch_idx, result_path)
+        if args.test_pre and epoch_idx >= 8:
+            test_loss, test_sam, test_psnr, test_ssim, test_mae = validate(test_loader, network_s, criterion_test, epoch_idx, result_path)
         if val_loss < best_loss:
             save_checkpoint(model_path, epoch_idx, network_s, optimizer, name='best')
             logger.info(f"save epoch{epoch_idx} to best.pkl")
+            if epoch_idx < 10:
+                save_checkpoint(model_path, epoch_idx, network_s, optimizer, name='best10')
             best_loss = val_loss
         epoch_time = time.time() - start_time
-        
-        #criterion.show()
-        #criterion.reset()
 
         lr = optimizer.param_groups[0]['lr']
         if args.test_pre and epoch_idx >= 8:

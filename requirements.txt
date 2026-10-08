@@ -1,0 +1,20 @@
+# Versions verified against the environment that produced every number
+# reported in the paper (Python 3.9.19, CUDA 12.x).
+#
+# torch / torchvision are installed from the official PyTorch index rather
+# than from PyPI, so they are pinned here for the record but should be
+# installed with the command given in README.md section 1.
+torch==2.4.1
+torchvision==0.19.1
+
+numpy==1.26.4
+einops==0.8.0
+
+opencv-python==4.10.0.84
+rasterio==1.4.3
+scikit-image==0.24.0
+scipy==1.13.0
+pytorch-msssim==1.0.0
+tqdm==4.67.1
+tensorboard==2.19.0
+Pillow==10.4.0

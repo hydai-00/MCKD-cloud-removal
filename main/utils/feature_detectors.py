@@ -83,7 +83,6 @@ def get_cloud_mask(data_image, cloud_threshold, binarize=False, use_moist_check=
         score[score >= cloud_threshold] = 1
         score[score < cloud_threshold] = 0
     coverage = np.sum(score) / 256 ** 2
-    # return score
     return coverage
 
 def get_cloud_mask_2(data_image, cloud_threshold, binarize=False, use_moist_check=False):
